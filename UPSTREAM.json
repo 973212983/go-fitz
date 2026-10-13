@@ -1,0 +1,58 @@
+{
+  "upstream": "github.com/gen2brain/go-fitz",
+  "version": "v1.28.2",
+  "base_commit": "1c84212a3e4e5b0de05cb5cba1a9e013c8dbbc7a",
+  "fork": "github.com/973212983/go-fitz",
+  "branch": "invoicefile",
+  "changed_files": [
+    "fitz_jpeg_cgo.go",
+    "fitz_jpeg_nocgo.go",
+    "fitz_jpeg_fast.c",
+    "fitz_jpeg_render.c",
+    "fitz_jpeg_encode.c",
+    "fitz_jpeg_encode.h",
+    "fitz_jpeg_test.go",
+    "fitz_jpeg_internal_test.go",
+    "INVOICEFILE.md"
+  ],
+  "jpeg_header_source": {
+    "repository": "ArtifexSoftware/thirdparty-libjpeg",
+    "commit": "627faae398468d5d11e3d694dc325432f734b5c4",
+    "mupdf_version": "1.28.0"
+  },
+  "jpeg_headers": {
+    "jconfig.h": "0383f2061c9d2bfd6e02dda4c895666a2631143aa9fe72ce43d4a1104bf7e855",
+    "jmemcust.h": "03990b0778a62aa620c1685542b1a376c062ea292082ad82b22274df13f5b672",
+    "jmorecfg.h": "9ba5b30d94da53a424cdf8e9eef34e9911c76d18e84998dc2bde0d1bb0531194",
+    "jpeglib.h": "90036af0336fee3bbca10b71cdd394c4445c35112d63f63477bd140de0778d5f",
+    "README": "913af09f785683accdf660b85dcf27fdd567d4ad649daa95cb8771b040db79d1"
+  },
+  "archives": {
+    "libmupdf_android_amd64.a": "aeb5081f24c3a61c3ea92ba861817fc1518b94ceca85b3a5afc119950f3a5a5e",
+    "libmupdf_android_arm64.a": "2d1f7a51340a9dc9a65a3c018f422a85da00767ba79c0d1ddf0e987a61e8b541",
+    "libmupdf_darwin_amd64.a": "6f8f37281897be6c0fb03a92292ccc64ce4ac59aaf20cf48321cdce84b2a801d",
+    "libmupdf_darwin_arm64.a": "22b19cb9f4a2bbb9476d4e83a74524abd870e593672167f24dfbf45fced6312e",
+    "libmupdf_haiku_386.a": "1e1f49733cbb26a002dee82949cf9028333a9079581fcb6124ec84ab7802b1ca",
+    "libmupdf_haiku_amd64.a": "4cee09a49e615d9baff97a167c8288b3f7ce4e018b44e9bc1305286e11eac220",
+    "libmupdf_haiku_arm64.a": "cac578c669189ea38471c2c09d156e10aea060381f3806a13ed4bae26b9f373c",
+    "libmupdf_linux_amd64.a": "d19c82fa9a439d2fbf2def09699e8ff30bc9398bdedef0da7f44fe5223040ced",
+    "libmupdf_linux_amd64_musl.a": "70bfbcc5577c0f90895d70f391376f40d822405d7f07555e054252118aa3ee30",
+    "libmupdf_linux_arm64.a": "e864c8864540b2bfd5d699c2aaa1ebafc7d9eb636d79ecc3010fae9a76854f14",
+    "libmupdf_linux_arm64_musl.a": "403c2f1d9e9192fc0a3821fc18d49190cbaf0c4b661f3df057ab2ee69da5b19b",
+    "libmupdf_windows_amd64.a": "898cf23cb9f9fba7f53a02207701f4f365eaa5a4d5e9947d87e50ef4ead41608",
+    "libmupdf_windows_arm64.a": "5ca63c0b1492c81f4ffd9759fd4e3b9f5a7327cec76f31a8e00deb2d82981e6b",
+    "libmupdfthird_android_amd64.a": "9ba3e66116de2f48922e2d77d400494f6f9cd1153885cb063dba18a101884ed4",
+    "libmupdfthird_android_arm64.a": "5f8242238e1e39920eec62180f44f5e7067e8154b587b9f9eecfef800fa3e4ee",
+    "libmupdfthird_darwin_amd64.a": "9052c9565765370782afab5dbac5aa2cc4a42216a750b9d5a481bee52c43132e",
+    "libmupdfthird_darwin_arm64.a": "d8313c9c3aa4583765700153a3e507306209dfa91897675a11bb03f9a0e278f7",
+    "libmupdfthird_haiku_386.a": "701c7c28c39b11976532a1dc29b3d1cf37b7b6f49f47e78d787df4528a00b5f6",
+    "libmupdfthird_haiku_amd64.a": "2b62c7964493424f18411079b2afb8d3490afc7442c53c54f21c8479a061e9db",
+    "libmupdfthird_haiku_arm64.a": "87da07b64d2b0a69b7493701fae2d45862761050f407075b0065e56a675605a3",
+    "libmupdfthird_linux_amd64.a": "472a2285034a63f0c03a4cc36ecda89cc8fdc9f970c97c47a8ed0b2e1ca1e16e",
+    "libmupdfthird_linux_amd64_musl.a": "aa993e4925765efb2bd2c6263e0c5da7ab766910b992a8eeaedd159c5978b65d",
+    "libmupdfthird_linux_arm64.a": "1e94d0780ef11bb7aa1edf4510a91c2871281f1651dc6db433471356c6856e1c",
+    "libmupdfthird_linux_arm64_musl.a": "caf0135e119251b22a890d0c883c70aacc0a79e8dc8e4280a7f3c684910eea92",
+    "libmupdfthird_windows_amd64.a": "e736d542ab4d5c128c522f7f6f4c466bebbab15a7cbae8255d0c548e3bb9fdce",
+    "libmupdfthird_windows_arm64.a": "df3f3c7d743a886f45f7e0a5016529c0bf09940b59ded5dc616827562a9a6b57"
+  }
+}
