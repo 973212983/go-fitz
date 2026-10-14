@@ -248,7 +248,7 @@ invoice_write_pixmap_as_jpeg(fz_context *ctx, fz_output *out, fz_pixmap *pix, in
 }
 
 
-/* invoicefile modification of MuPDF 1.28.0 output-jpeg.c:
+/* Modified from MuPDF 1.28.0 output-jpeg.c:
  * retain the upstream allocator/error handling; use baseline 4:2:0 encoding.
  */
 fz_buffer *invoice_new_buffer_as_jpeg(fz_context *ctx, fz_pixmap *pix, int quality)

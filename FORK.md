@@ -1,6 +1,6 @@
-# invoicefile 维护的 go-fitz 分支
+# 发票 JPEG 渲染的 go-fitz 分支
 
-基线：github.com/gen2brain/go-fitz v1.28.2（提交 1c84212）。本仓库 fork 自上游，改动在 invoicefile 分支，打常规版本号标签（当前 v1.28.4，基于上游 v1.28.2）。模块路径仍为 github.com/gen2brain/go-fitz，invoicefile 项目在 go.mod 中用 `replace github.com/gen2brain/go-fitz => github.com/973212983/go-fitz <标签>` 引用，代码中的 import 不变。
+基线：github.com/gen2brain/go-fitz v1.28.2（提交 1c84212）。本仓库 fork 自上游，改动在 jpeg 分支，打常规版本号标签（当前 v1.28.5，基于上游 v1.28.2）。模块路径仍为 github.com/gen2brain/go-fitz，使用方在 go.mod 中用 `replace github.com/gen2brain/go-fitz => github.com/973212983/go-fitz <标签>` 引用，代码中的 import 不变。
 
 新增的 ImageJPEG(page, dpi, quality) 在 CGO 构建中由 C 完成绘制和 JPEG 编码，只把压缩后的字节复制到 Go，没有整页 Go 像素缓冲。原 ImageDPI/PNG 等 API 保留。nocgo 版本使用原 ImageDPI + Go JPEG 编码作为兼容回退。
 
@@ -28,7 +28,7 @@ fitz_jpeg_encode.c 保留原 libjpeg 编码路径（派生自 MuPDF 1.28.0 outpu
 
 fitz_jpeg_internal_test.go 覆盖：DropToUnicode 前后像素一致且文本映射确已删除（测试内合成嵌入 TrueType CID 字体）；页面缓冲在不同页面尺寸间复用、并发渲染结果一致且空闲缓冲不超过上限；合成图像（多种尺寸、内容、质量，RGB 与 RGBA）快速编码器与 libjpeg 逐字节一致；渲染页面两种编码器一致；图片缓存命中前后与 MuPDF 直接绘制逐像素一致；跳过透明组的差异上限与含混合模式页面的回退；多 goroutine 并发渲染结果一致。
 
-更新上游时：把 invoicefile 分支变基到新的上游标签，保留 COPYING/AUTHORS，按新版本同步整套头文件与静态库，执行本模块全部测试和 invoicefile 的 gen 测试，并检查 Windows amd64 与 Linux musl 静态构建，以及真实票面质量/性能；然后打新标签（上游尚未使用的下一个补丁号，如同步上游 v1.29.0 后用 v1.29.1），再更新 invoicefile 项目 go.mod 中的 replace 版本。修改本分支后同样需要打新标签。标签一经发布不要移动或复用（Go 模块代理与 sum.golang.org 会永久记录），v1.28.2-invoicefile.1 已被记录，不再使用。libjpeg 版本或默认参数变化时，以 TestEncodeJPEGMatchesLibjpeg 为准调整 fitz_jpeg_fast.c；MuPDF 的图片解码或透明组逻辑变化时，以 TestImageCacheKeepsPixels、TestPageGroupSkip 为准复核 fitz_jpeg_render.c。
+更新上游时：把 jpeg 分支变基到新的上游标签，保留 COPYING/AUTHORS，按新版本同步整套头文件与静态库，执行本模块全部测试和使用方的渲染测试，并检查 Windows amd64 与 Linux musl 静态构建，以及真实票面质量/性能；然后打新标签（上游尚未使用的下一个补丁号，如同步上游 v1.29.0 后用 v1.29.1），再更新使用方 go.mod 中的 replace 版本。修改本分支后同样需要打新标签。标签一经发布不要移动或复用（Go 模块代理与 sum.golang.org 会永久记录），v1.28.2 加后缀的预发布标签已被记录，不再使用。libjpeg 版本或默认参数变化时，以 TestEncodeJPEGMatchesLibjpeg 为准调整 fitz_jpeg_fast.c；MuPDF 的图片解码或透明组逻辑变化时，以 TestImageCacheKeepsPixels、TestPageGroupSkip 为准复核 fitz_jpeg_render.c。
 
 验证命令（在本仓库根目录执行；Windows 需 MinGW）：
 
@@ -36,4 +36,4 @@ fitz_jpeg_internal_test.go 覆盖：DropToUnicode 前后像素一致且文本映
 go test ./...
 ```
 
-Linux 用 CGO_ENABLED=1 和 -tags musl；invoicefile 项目的 build.cmd/buildver.bat 配置了 Zig musl 交叉编译。
+Linux 用 CGO_ENABLED=1 和 -tags musl；Windows 上可用 Zig（CC="zig cc -target x86_64-linux-musl"）交叉编译。

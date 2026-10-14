@@ -3,7 +3,7 @@
   "version": "v1.28.2",
   "base_commit": "1c84212a3e4e5b0de05cb5cba1a9e013c8dbbc7a",
   "fork": "github.com/973212983/go-fitz",
-  "branch": "invoicefile",
+  "branch": "jpeg",
   "changed_files": [
     "fitz_jpeg_cgo.go",
     "fitz_jpeg_nocgo.go",
@@ -13,7 +13,7 @@
     "fitz_jpeg_encode.h",
     "fitz_jpeg_test.go",
     "fitz_jpeg_internal_test.go",
-    "INVOICEFILE.md"
+    "FORK.md"
   ],
   "jpeg_header_source": {
     "repository": "ArtifexSoftware/thirdparty-libjpeg",
