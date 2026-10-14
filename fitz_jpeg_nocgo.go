@@ -30,3 +30,8 @@ func (f *Document) ImageJPEG(pageNumber int, dpi float64, quality int) ([]byte, 
 	}
 	return buf.Bytes(), nil
 }
+
+// DropToUnicode only matters for the native CGO renderer.
+func (f *Document) DropToUnicode() error {
+	return nil
+}

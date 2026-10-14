@@ -27,7 +27,7 @@ static fz_buffer *invoice_render_jpeg(fz_context *ctx, fz_document *doc, int num
             : invoice_encode_jpeg(ctx, pixmap, quality);
     }
     fz_always(ctx) {
-        fz_drop_pixmap(ctx, pixmap);
+        invoice_drop_page_pixmap(ctx, pixmap);
         fz_drop_page(ctx, page);
     }
     fz_catch(ctx) {
@@ -59,7 +59,7 @@ static fz_buffer *invoice_render_rgb(fz_context *ctx, fz_document *doc, int numb
         *h = pixmap->h;
     }
     fz_always(ctx) {
-        fz_drop_pixmap(ctx, pixmap);
+        invoice_drop_page_pixmap(ctx, pixmap);
         fz_drop_page(ctx, page);
     }
     fz_catch(ctx) {
@@ -68,6 +68,17 @@ static fz_buffer *invoice_render_rgb(fz_context *ctx, fz_document *doc, int numb
         return NULL;
     }
     return buffer;
+}
+
+static int invoice_drop_to_unicode_safe(fz_context *ctx, fz_document *doc, char *message, size_t message_size)
+{
+    fz_try(ctx)
+        invoice_drop_to_unicode(ctx, doc);
+    fz_catch(ctx) {
+        snprintf(message, message_size, "%s", fz_caught_message(ctx));
+        return 0;
+    }
+    return 1;
 }
 
 static fz_context *invoice_new_context(void)
@@ -138,6 +149,22 @@ func (f *Document) imageJPEG(pageNumber int, dpi float64, quality int, flags int
 		return nil, fmt.Errorf("fitz: JPEG rendering failed: %s", C.GoString(&message[0]))
 	}
 	return takeBuffer(f.ctx, buffer)
+}
+
+// DropToUnicode removes the ToUnicode maps of embedded CID (Type0) fonts from
+// this document in memory, before any page is rendered.  Loading such a font
+// otherwise remaps every code of its encoding through the map, which is a large
+// part of rendering a short document.  Rendered pixels stay the same, but text
+// extraction from this Document afterwards loses the Unicode mapping, so only
+// call it on documents opened for rendering.
+func (f *Document) DropToUnicode() error {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	var message [256]C.char
+	if C.invoice_drop_to_unicode_safe(f.ctx, f.doc, &message[0], C.size_t(len(message))) == 0 {
+		return fmt.Errorf("fitz: dropping ToUnicode failed: %s", C.GoString(&message[0]))
+	}
+	return nil
 }
 
 func checkJPEGParams(dpi float64, quality int) error {
@@ -212,6 +239,16 @@ func imageCacheStats() (hits, misses int64, entries, bytes int) {
 	var b C.size_t
 	C.invoice_image_cache_stats(&h, &m, &e, &b)
 	return int64(h), int64(m), int(e), int(b)
+}
+
+// pagePoolCount reports the idle page buffers; for tests.
+func pagePoolCount() int {
+	return int(C.invoice_page_pool_count())
+}
+
+// clearPagePool frees the idle page buffers; for tests.
+func clearPagePool() {
+	C.invoice_page_pool_clear()
 }
 
 // clearImageCache empties the shared decoded image cache; for tests.

@@ -24,10 +24,25 @@
 #include "mupdf/fitz.h"
 #include "fitz_jpeg_encode.h"
 
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The bundled headers stop at fitz; these are the MuPDF 1.28 declarations. */
+typedef struct pdf_document pdf_document;
+typedef struct pdf_obj pdf_obj;
+pdf_document *pdf_document_from_fz_document(fz_context *ctx, fz_document *ptr);
+int pdf_count_pages(fz_context *ctx, pdf_document *doc);
+pdf_obj *pdf_lookup_page_obj(fz_context *ctx, pdf_document *doc, int needle);
+pdf_obj *pdf_dict_getp_inheritable(fz_context *ctx, pdf_obj *dict, const char *path);
+pdf_obj *pdf_dict_gets(fz_context *ctx, pdf_obj *dict, const char *key);
+int pdf_dict_len(fz_context *ctx, pdf_obj *dict);
+pdf_obj *pdf_dict_get_val(fz_context *ctx, pdf_obj *dict, int idx);
+const char *pdf_to_name(fz_context *ctx, pdf_obj *obj);
+pdf_obj *pdf_array_get(fz_context *ctx, pdf_obj *array, int i);
+void pdf_dict_dels(fz_context *ctx, pdf_obj *dict, const char *key);
 
 #define TILE_CACHE_MAX_ENTRIES 64
 #define TILE_CACHE_MAX_BYTES ((size_t)16 << 20)
@@ -73,9 +88,9 @@ static struct {
 } tile_cache;
 static atomic_flag tile_lock = ATOMIC_FLAG_INIT;
 
-static void cache_lock(void)
+static void spin_lock(atomic_flag *lock)
 {
-	while (atomic_flag_test_and_set_explicit(&tile_lock, memory_order_acquire)) {
+	while (atomic_flag_test_and_set_explicit(lock, memory_order_acquire)) {
 #if defined(__x86_64__) || defined(__i386__)
 		__builtin_ia32_pause();
 #elif defined(__aarch64__)
@@ -84,9 +99,19 @@ static void cache_lock(void)
 	}
 }
 
+static void spin_unlock(atomic_flag *lock)
+{
+	atomic_flag_clear_explicit(lock, memory_order_release);
+}
+
+static void cache_lock(void)
+{
+	spin_lock(&tile_lock);
+}
+
 static void cache_unlock(void)
 {
-	atomic_flag_clear_explicit(&tile_lock, memory_order_release);
+	spin_unlock(&tile_lock);
 }
 
 static uint64_t hash_bytes(uint64_t h, const unsigned char *p, size_t n)
@@ -626,18 +651,127 @@ static fz_device *new_invoice_filter(fz_context *ctx, fz_device *target, int kee
 	return &f->super;
 }
 
-/* Draw a page onto an opaque white RGB(A) pixmap at dpi. */
+/*
+ * Page pixel buffers are reused between pages and documents.  A page at
+ * 150 dpi needs several megabytes; allocating that afresh maps new memory and
+ * faults in every page of it, which cost about as much as the clearing itself.
+ * At most PAGE_POOL_MAX idle buffers are kept, so the retained memory is bounded
+ * by that many pages.  Plain malloc'd memory, independent of any fz_context.
+ */
+#define PAGE_POOL_MAX 4
+#define PAGE_POOL_MAX_BYTES ((size_t)64 << 20)
+
+typedef struct {
+	size_t cap;
+	size_t pad; /* keeps the samples 16-byte aligned */
+} page_buffer;
+
+static struct {
+	page_buffer *idle[PAGE_POOL_MAX];
+	int count;
+} page_pool;
+static atomic_flag page_pool_lock = ATOMIC_FLAG_INIT;
+
+static unsigned char *page_buffer_take(fz_context *ctx, size_t size)
+{
+	page_buffer *b = NULL;
+	spin_lock(&page_pool_lock);
+	for (int i = 0; i < page_pool.count; i++)
+		if (page_pool.idle[i]->cap >= size) {
+			b = page_pool.idle[i];
+			page_pool.idle[i] = page_pool.idle[--page_pool.count];
+			break;
+		}
+	spin_unlock(&page_pool_lock);
+	if (!b) {
+		if (size > SIZE_MAX - sizeof *b)
+			fz_throw(ctx, FZ_ERROR_LIMIT, "page too large");
+		b = malloc(sizeof *b + size);
+		if (!b)
+			fz_throw(ctx, FZ_ERROR_SYSTEM, "cannot allocate page buffer");
+		b->cap = size;
+	}
+	return (unsigned char *)(b + 1);
+}
+
+static void page_buffer_give(unsigned char *samples)
+{
+	page_buffer *b = (page_buffer *)samples - 1;
+	spin_lock(&page_pool_lock);
+	if (b->cap <= PAGE_POOL_MAX_BYTES) {
+		if (page_pool.count < PAGE_POOL_MAX) {
+			page_pool.idle[page_pool.count++] = b;
+			b = NULL;
+		} else {
+			/* Keep the largest buffers so that any page size can be served. */
+			int smallest = 0;
+			for (int i = 1; i < PAGE_POOL_MAX; i++)
+				if (page_pool.idle[i]->cap < page_pool.idle[smallest]->cap)
+					smallest = i;
+			if (page_pool.idle[smallest]->cap < b->cap) {
+				page_buffer *t = page_pool.idle[smallest];
+				page_pool.idle[smallest] = b;
+				b = t;
+			}
+		}
+	}
+	spin_unlock(&page_pool_lock);
+	free(b);
+}
+
+void invoice_drop_page_pixmap(fz_context *ctx, fz_pixmap *pix)
+{
+	unsigned char *samples;
+	if (!pix)
+		return;
+	/* Only invoice_render_page() creates these; nothing else holds a reference. */
+	samples = pix->samples;
+	fz_drop_pixmap(ctx, pix);
+	page_buffer_give(samples);
+}
+
+void invoice_page_pool_clear(void)
+{
+	page_buffer *idle[PAGE_POOL_MAX];
+	int count;
+	spin_lock(&page_pool_lock);
+	count = page_pool.count;
+	memcpy(idle, page_pool.idle, sizeof idle);
+	page_pool.count = 0;
+	spin_unlock(&page_pool_lock);
+	for (int i = 0; i < count; i++)
+		free(idle[i]);
+}
+
+int invoice_page_pool_count(void)
+{
+	int count;
+	spin_lock(&page_pool_lock);
+	count = page_pool.count;
+	spin_unlock(&page_pool_lock);
+	return count;
+}
+
+/* Draw a page onto an opaque white RGB(A) pixmap at dpi.  The result must be
+ * released with invoice_drop_page_pixmap(). */
 fz_pixmap *invoice_render_page(fz_context *ctx, fz_page *page, double dpi, int alpha, int flags)
 {
 	fz_pixmap *pix = NULL;
+	unsigned char *samples = NULL;
 	fz_device *draw = NULL, *filter = NULL;
 	fz_var(pix);
+	fz_var(samples);
 	fz_var(draw);
 	fz_var(filter);
 	fz_try(ctx) {
 		fz_matrix scale = fz_scale((float)(dpi / 72.0), (float)(dpi / 72.0));
 		fz_irect bbox = fz_round_rect(fz_transform_rect(fz_bound_page(ctx, page), scale));
-		pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, NULL, alpha);
+		/* The same overflow checks as fz_new_pixmap_with_bbox(). */
+		int w = fz_irect_width(bbox), h = fz_irect_height(bbox), n = 3 + alpha;
+		if (w <= 0 || h <= 0 || w > INT_MAX / n)
+			fz_throw(ctx, FZ_ERROR_LIMIT, "invalid page size %dx%d", w, h);
+		samples = page_buffer_take(ctx, (size_t)w * n * h);
+		pix = fz_new_pixmap_with_bbox_and_data(ctx, fz_device_rgb(ctx), bbox, NULL, alpha, samples);
 		fz_set_pixmap_resolution(ctx, pix, (int)dpi, (int)dpi);
 		for (int attempt = 0; attempt < 2; attempt++) {
 			int keep_group = attempt > 0 || (flags & INVOICE_RENDER_KEEP_GROUP);
@@ -669,8 +803,40 @@ fz_pixmap *invoice_render_page(fz_context *ctx, fz_page *page, double dpi, int a
 		fz_drop_device(ctx, draw);
 	}
 	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pix);
+		if (pix)
+			invoice_drop_page_pixmap(ctx, pix);
+		else if (samples)
+			page_buffer_give(samples);
 		fz_rethrow(ctx);
 	}
 	return pix;
+}
+
+/*
+ * Remove /ToUnicode from the Type0 fonts with embedded font programs on every
+ * page.  Loading such a font remaps all 65536 codes of its Identity encoding
+ * through the ToUnicode CMap, a large part of loading invoice fonts.  Glyphs of
+ * embedded CID fonts come from the CIDs alone, so pixels do not change; only
+ * text extraction loses its Unicode mapping.  Fonts in form XObjects keep it.
+ */
+void invoice_drop_to_unicode(fz_context *ctx, fz_document *doc)
+{
+	pdf_document *pdf = pdf_document_from_fz_document(ctx, doc);
+	if (!pdf)
+		return;
+	int pages = pdf_count_pages(ctx, pdf);
+	for (int i = 0; i < pages; i++) {
+		pdf_obj *page = pdf_lookup_page_obj(ctx, pdf, i);
+		pdf_obj *fonts = pdf_dict_gets(ctx, pdf_dict_getp_inheritable(ctx, page, "Resources"), "Font");
+		int n = pdf_dict_len(ctx, fonts);
+		for (int k = 0; k < n; k++) {
+			pdf_obj *font = pdf_dict_get_val(ctx, fonts, k);
+			if (strcmp(pdf_to_name(ctx, pdf_dict_gets(ctx, font, "Subtype")), "Type0"))
+				continue;
+			pdf_obj *cid = pdf_array_get(ctx, pdf_dict_gets(ctx, font, "DescendantFonts"), 0);
+			pdf_obj *desc = pdf_dict_gets(ctx, cid, "FontDescriptor");
+			if (pdf_dict_gets(ctx, desc, "FontFile2") || pdf_dict_gets(ctx, desc, "FontFile3") || pdf_dict_gets(ctx, desc, "FontFile"))
+				pdf_dict_dels(ctx, font, "ToUnicode");
+		}
+	}
 }

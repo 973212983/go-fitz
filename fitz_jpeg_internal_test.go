@@ -7,6 +7,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -327,5 +328,191 @@ func TestImageCacheConcurrentDocuments(t *testing.T) {
 	}
 	if hits, _, _, _ := imageCacheStats(); hits == 0 {
 		t.Fatal("no cache hits")
+	}
+}
+
+// glyphFont returns a TrueType font whose glyph 1 is a square and glyph 2 a
+// triangle, with only the tables FreeType needs for CID-keyed use.
+func glyphFont() []byte {
+	be := func(vs ...int) []byte {
+		var out []byte
+		for _, v := range vs {
+			out = append(out, byte(v>>8), byte(v))
+		}
+		return out
+	}
+	glyph := func(xs, ys []int) []byte {
+		n := len(xs)
+		g := be(1, 0, 0, 1000, 1000, n-1, 0) // one contour, bbox, end point, no instructions
+		for range n {
+			g = append(g, 0x01) // on curve, 16-bit coordinates
+		}
+		px, py := 0, 0
+		for i := range n {
+			g = append(g, be(xs[i]-px)...)
+			px = xs[i]
+		}
+		for i := range n {
+			g = append(g, be(ys[i]-py)...)
+			py = ys[i]
+		}
+		return g
+	}
+	glyf := append(glyph([]int{100, 100, 900, 900}, []int{100, 900, 900, 100}), glyph([]int{100, 500, 900}, []int{100, 900, 100})...)
+	if len(glyf)%2 != 0 {
+		glyf = append(glyf, 0)
+	}
+	first := len(glyph([]int{100, 100, 900, 900}, []int{100, 900, 900, 100}))
+	tables := []struct {
+		tag  string
+		data []byte
+	}{
+		{"glyf", glyf},
+		// unitsPerEm 1000, short loca
+		{"head", append(be(1, 0, 0, 0, 0, 0, 0x5F0F, 0x3CF5, 0, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000, 1000, 0, 8, 2), be(0, 0)...)},
+		{"hhea", be(1, 0, 1000, 0, 0, 1000, 0, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, 3)},
+		{"hmtx", be(1000, 0, 1000, 0, 1000, 0)},
+		{"loca", be(0, 0, first/2, len(glyf)/2)},
+		{"maxp", be(1, 0, 3, 4, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0)},
+	}
+	var font bytes.Buffer
+	font.Write(be(1, 0, len(tables), 64, 2, len(tables)*16-64))
+	offset := 12 + 16*len(tables)
+	for _, table := range tables {
+		font.WriteString(table.tag)
+		font.Write(be(0, 0, offset>>16, offset, len(table.data)>>16, len(table.data)))
+		offset += (len(table.data) + 3) &^ 3
+	}
+	for _, table := range tables {
+		font.Write(table.data)
+		font.Write(make([]byte, (4-len(table.data)%4)%4))
+	}
+	return font.Bytes()
+}
+
+// cidFontPDF draws glyphs 1 and 2 with an embedded Identity-H CID font whose
+// ToUnicode maps them to "AB".
+func cidFontPDF() []byte {
+	font := glyphFont()
+	cmap := "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n" +
+		"/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n" +
+		"/CMapName /Adobe-Identity-UCS def /CMapType 2 def\n" +
+		"1 begincodespacerange <0000> <FFFF> endcodespacerange\n" +
+		"2 beginbfchar <0001> <0041> <0002> <0042> endbfchar\n" +
+		"endcmap CMapName currentdict /CMap defineresource pop end end\n"
+	content := "0 0 1 rg BT /F1 40 Tf 10 20 Td <00010002> Tj ET\n"
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 80] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+		pdfStream("", []byte(content)),
+		"<< /Type /Font /Subtype /Type0 /BaseFont /Glyphs /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 9 0 R >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Glyphs /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 7 0 R /W [1 [1000 1000]] >>",
+		"<< /Type /FontDescriptor /FontName /Glyphs /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 1000 /Descent 0 /CapHeight 1000 /StemV 80 /FontFile2 8 0 R >>",
+		pdfStream(fmt.Sprintf("/Length1 %d", len(font)), font),
+		pdfStream("", []byte(cmap)),
+	}
+	var b bytes.Buffer
+	b.WriteString("%PDF-1.4\n")
+	offsets := []int{0}
+	for i, obj := range objects {
+		offsets = append(offsets, b.Len())
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, obj)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(offsets))
+	for _, offset := range offsets[1:] {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(offsets), xref)
+	return b.Bytes()
+}
+
+func TestDropToUnicodeKeepsPixels(t *testing.T) {
+	pdf := cidFontPDF()
+	render := func(drop bool) ([]byte, string) {
+		doc, err := NewFromMemory(pdf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer doc.Close()
+		if drop {
+			if err := doc.DropToUnicode(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pix, _, _, err := doc.renderRGB(0, 150, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text, err := doc.Text(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pix, text
+	}
+	want, text := render(false)
+	got, dropped := render(true)
+	if most, count := maxDiff(want, got); count != 0 {
+		t.Fatalf("%d samples differ, max %d", count, most)
+	}
+	ink := 0
+	for i := 0; i+2 < len(want); i += 3 {
+		if want[i] < 128 && want[i+2] > 128 {
+			ink++
+		}
+	}
+	if ink < 1000 {
+		t.Fatalf("glyphs not drawn: %d blue pixels", ink)
+	}
+	if !strings.Contains(text, "AB") || strings.Contains(dropped, "AB") {
+		t.Fatalf("text %q, after DropToUnicode %q", text, dropped)
+	}
+}
+
+func TestPagePoolReuse(t *testing.T) {
+	clearPagePool()
+	defer clearPagePool()
+	pdfs := [][]byte{imagePDF(0, false), jpegTestPDFInternal(), cidFontPDF()}
+	want := make([][]byte, len(pdfs))
+	for i, pdf := range pdfs {
+		want[i], _, _ = renderRGBOnce(t, pdf, 0)
+	}
+	if n := pagePoolCount(); n != 1 {
+		t.Fatalf("idle buffers after sequential renders: %d", n)
+	}
+	// Buffers left by larger pages serve smaller ones and the other way round.
+	for round := range 3 {
+		for i := len(pdfs) - 1; i >= 0; i-- {
+			got, _, _ := renderRGBOnce(t, pdfs[i], 0)
+			if !bytes.Equal(got, want[i]) {
+				t.Fatalf("round %d document %d: pixels differ", round, i)
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	for worker := range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 20 {
+				k := (worker + i) % len(pdfs)
+				doc, err := NewFromMemory(pdfs[k])
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				got, _, _, err := doc.renderRGB(0, 150, 0)
+				doc.Close()
+				if err != nil || !bytes.Equal(got, want[k]) {
+					t.Errorf("worker %d document %d: err=%v", worker, k, err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if n := pagePoolCount(); n < 1 || n > 4 {
+		t.Fatalf("idle buffers after concurrent renders: %d", n)
 	}
 }
