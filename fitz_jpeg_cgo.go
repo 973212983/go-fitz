@@ -3,14 +3,34 @@
 package fitz
 
 /*
+#cgo windows,amd64 CFLAGS: -DFITZ_TURBOJPEG
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/libs -lturbojpeg_windows_amd64
+#cgo linux,!android,amd64 CFLAGS: -DFITZ_TURBOJPEG
+#cgo linux,!android,amd64,!musl LDFLAGS: -L${SRCDIR}/libs -lturbojpeg_linux_amd64
+#cgo linux,!android,amd64,musl LDFLAGS: -L${SRCDIR}/libs -lturbojpeg_linux_amd64_musl
+
 #include <mupdf/fitz.h>
 #include "fitz_jpeg_encode.h"
 #include <stdio.h>
 
+static fz_buffer *invoice_encode(fz_context *ctx, fz_pixmap *pixmap, int quality, int encoder)
+{
+    if (encoder == INVOICE_ENCODER_DEFAULT)
+        encoder = invoice_has_turbojpeg() ? INVOICE_ENCODER_TURBO : INVOICE_ENCODER_FAST;
+    switch (encoder) {
+    case INVOICE_ENCODER_LIBJPEG:
+        return invoice_new_buffer_as_jpeg(ctx, pixmap, quality);
+    case INVOICE_ENCODER_TURBO:
+        return invoice_encode_jpeg_turbo(ctx, pixmap, quality);
+    default:
+        return invoice_encode_jpeg(ctx, pixmap, quality);
+    }
+}
+
 // All MuPDF calls that may throw stay inside fz_try; longjmp must never cross Go frames.
-// flags and libjpeg select the reference paths compared by tests.
+// flags and encoder select the reference paths compared by tests.
 static fz_buffer *invoice_render_jpeg(fz_context *ctx, fz_document *doc, int number,
-    double dpi, int quality, int flags, int libjpeg, char *message, size_t message_size)
+    double dpi, int quality, int flags, int encoder, char *message, size_t message_size)
 {
     fz_page *page = NULL;
     fz_pixmap *pixmap = NULL;
@@ -23,8 +43,7 @@ static fz_buffer *invoice_render_jpeg(fz_context *ctx, fz_document *doc, int num
         page = fz_load_page(ctx, doc, number);
         // Without alpha the draw device produces the same pixels, faster.
         pixmap = invoice_render_page(ctx, page, dpi, 0, flags);
-        buffer = libjpeg ? invoice_new_buffer_as_jpeg(ctx, pixmap, quality)
-            : invoice_encode_jpeg(ctx, pixmap, quality);
+        buffer = invoice_encode(ctx, pixmap, quality, encoder);
     }
     fz_always(ctx) {
         invoice_drop_page_pixmap(ctx, pixmap);
@@ -88,7 +107,7 @@ static fz_context *invoice_new_context(void)
 
 // Encodes caller-owned RGB or RGBA samples with one of the encoders.
 static fz_buffer *invoice_encode_samples(fz_context *ctx, unsigned char *samples, int w, int h,
-    int n, int quality, int libjpeg, char *message, size_t message_size)
+    int n, int quality, int encoder, char *message, size_t message_size)
 {
     fz_pixmap *pixmap = NULL;
     fz_buffer *buffer = NULL;
@@ -98,8 +117,7 @@ static fz_buffer *invoice_encode_samples(fz_context *ctx, unsigned char *samples
     fz_try(ctx) {
         pixmap = fz_new_pixmap_with_data(ctx, fz_device_rgb(ctx), w, h, NULL, n == 4, w * n, samples);
         fz_set_pixmap_resolution(ctx, pixmap, 150, 150);
-        buffer = libjpeg ? invoice_new_buffer_as_jpeg(ctx, pixmap, quality)
-            : invoice_encode_jpeg(ctx, pixmap, quality);
+        buffer = invoice_encode(ctx, pixmap, quality, encoder);
     }
     fz_always(ctx)
         fz_drop_pixmap(ctx, pixmap);
@@ -127,13 +145,24 @@ const (
 	renderPlain        = C.INVOICE_RENDER_PLAIN
 )
 
+// JPEG encoders.  ImageJPEG uses encoderDefault: libjpeg-turbo where libs/
+// ships it (hasTurboJPEG), otherwise the fast encoder.
+const (
+	encoderDefault = C.INVOICE_ENCODER_DEFAULT
+	encoderFast    = C.INVOICE_ENCODER_FAST
+	encoderLibjpeg = C.INVOICE_ENCODER_LIBJPEG
+	encoderTurbo   = C.INVOICE_ENCODER_TURBO
+)
+
+var hasTurboJPEG = C.invoice_has_turbojpeg() != 0
+
 // ImageJPEG renders a zero-based page at dpi and encodes baseline JPEG in C.
 // Only the compressed JPEG is copied into Go; no Go pixel buffer is allocated.
 func (f *Document) ImageJPEG(pageNumber int, dpi float64, quality int) ([]byte, error) {
-	return f.imageJPEG(pageNumber, dpi, quality, 0, false)
+	return f.imageJPEG(pageNumber, dpi, quality, 0, encoderDefault)
 }
 
-func (f *Document) imageJPEG(pageNumber int, dpi float64, quality int, flags int, libjpeg bool) ([]byte, error) {
+func (f *Document) imageJPEG(pageNumber int, dpi float64, quality int, flags int, encoder int) ([]byte, error) {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	if pageNumber < 0 || pageNumber >= f.NumPage() {
@@ -144,7 +173,7 @@ func (f *Document) imageJPEG(pageNumber int, dpi float64, quality int, flags int
 	}
 	var message [256]C.char
 	buffer := C.invoice_render_jpeg(f.ctx, f.doc, C.int(pageNumber), C.double(dpi), C.int(quality),
-		C.int(flags), cBool(libjpeg), &message[0], C.size_t(len(message)))
+		C.int(flags), C.int(encoder), &message[0], C.size_t(len(message)))
 	if buffer == nil {
 		return nil, fmt.Errorf("fitz: JPEG rendering failed: %s", C.GoString(&message[0]))
 	}
@@ -177,13 +206,6 @@ func checkJPEGParams(dpi float64, quality int) error {
 	return nil
 }
 
-func cBool(v bool) C.int {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 // takeBuffer copies a MuPDF buffer into Go memory and drops it.
 func takeBuffer(ctx *C.struct_fz_context, buffer *C.fz_buffer) ([]byte, error) {
 	defer C.fz_drop_buffer(ctx, buffer)
@@ -213,8 +235,8 @@ func (f *Document) renderRGB(pageNumber int, dpi float64, flags int) ([]byte, in
 }
 
 // encodeSamples encodes width x height RGB (n = 3) or RGBA (n = 4) samples with
-// the fast encoder or libjpeg; for tests.
-func encodeSamples(samples []byte, width, height, n, quality int, libjpeg bool) ([]byte, error) {
+// one of the encoders; for tests.
+func encodeSamples(samples []byte, width, height, n, quality, encoder int) ([]byte, error) {
 	if width <= 0 || height <= 0 || (n != 3 && n != 4) || len(samples) != width*height*n {
 		return nil, errors.New("fitz: invalid samples")
 	}
@@ -225,7 +247,7 @@ func encodeSamples(samples []byte, width, height, n, quality int, libjpeg bool) 
 	defer C.fz_drop_context(ctx)
 	var message [256]C.char
 	buffer := C.invoice_encode_samples(ctx, (*C.uchar)(unsafe.Pointer(&samples[0])), C.int(width), C.int(height),
-		C.int(n), C.int(quality), cBool(libjpeg), &message[0], C.size_t(len(message)))
+		C.int(n), C.int(quality), C.int(encoder), &message[0], C.size_t(len(message)))
 	if buffer == nil {
 		return nil, fmt.Errorf("fitz: JPEG encoding failed: %s", C.GoString(&message[0]))
 	}

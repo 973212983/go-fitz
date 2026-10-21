@@ -61,11 +61,11 @@ func TestEncodeJPEGMatchesLibjpeg(t *testing.T) {
 			for kind := range 6 {
 				samples := samplePixels(size[0], size[1], n, kind, rng)
 				for _, quality := range []int{1, 10, 50, 75, 90, 100} {
-					fast, err := encodeSamples(samples, size[0], size[1], n, quality, false)
+					fast, err := encodeSamples(samples, size[0], size[1], n, quality, encoderFast)
 					if err != nil {
 						t.Fatal(err)
 					}
-					ref, err := encodeSamples(samples, size[0], size[1], n, quality, true)
+					ref, err := encodeSamples(samples, size[0], size[1], n, quality, encoderLibjpeg)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -78,8 +78,8 @@ func TestEncodeJPEGMatchesLibjpeg(t *testing.T) {
 	}
 	// A full page with text-like content.
 	samples := samplePixels(1240, 1755, 3, 3, rng)
-	fast, _ := encodeSamples(samples, 1240, 1755, 3, 90, false)
-	ref, _ := encodeSamples(samples, 1240, 1755, 3, 90, true)
+	fast, _ := encodeSamples(samples, 1240, 1755, 3, 90, encoderFast)
+	ref, _ := encodeSamples(samples, 1240, 1755, 3, 90, encoderLibjpeg)
 	if len(fast) == 0 || !bytes.Equal(fast, ref) {
 		t.Fatalf("page: %d bytes, libjpeg %d bytes", len(fast), len(ref))
 	}
@@ -239,11 +239,11 @@ func TestRenderedJPEGMatchesLibjpeg(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, flags := range []int{0, renderPlain} {
-			fast, err := doc.imageJPEG(0, 150, 90, flags, false)
+			fast, err := doc.imageJPEG(0, 150, 90, flags, encoderFast)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ref, err := doc.imageJPEG(0, 150, 90, flags, true)
+			ref, err := doc.imageJPEG(0, 150, 90, flags, encoderLibjpeg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -289,7 +289,7 @@ func TestImageCacheConcurrentDocuments(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want[i], err = doc.imageJPEG(0, 150, 90, renderNoImageCache, false)
+		want[i], err = doc.imageJPEG(0, 150, 90, renderNoImageCache, encoderDefault)
 		doc.Close()
 		if err != nil {
 			t.Fatal(err)

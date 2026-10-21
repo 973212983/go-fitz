@@ -13,6 +13,9 @@
     "fitz_jpeg_encode.h",
     "fitz_jpeg_test.go",
     "fitz_jpeg_internal_test.go",
+    "fitz_jpeg_turbo.c",
+    "fitz_jpeg_turbo_test.go",
+    "scripts/build-turbojpeg.sh",
     "FORK.md"
   ],
   "jpeg_header_source": {
@@ -53,6 +56,22 @@
     "libmupdfthird_linux_arm64.a": "1e94d0780ef11bb7aa1edf4510a91c2871281f1651dc6db433471356c6856e1c",
     "libmupdfthird_linux_arm64_musl.a": "caf0135e119251b22a890d0c883c70aacc0a79e8dc8e4280a7f3c684910eea92",
     "libmupdfthird_windows_amd64.a": "e736d542ab4d5c128c522f7f6f4c466bebbab15a7cbae8255d0c548e3bb9fdce",
-    "libmupdfthird_windows_arm64.a": "df3f3c7d743a886f45f7e0a5016529c0bf09940b59ded5dc616827562a9a6b57"
+    "libmupdfthird_windows_arm64.a": "df3f3c7d743a886f45f7e0a5016529c0bf09940b59ded5dc616827562a9a6b57",
+    "libturbojpeg_linux_amd64.a": "609a197b5c25161020b7b968d3b306bb883c1570c9934381907a38aa50989165",
+    "libturbojpeg_linux_amd64_musl.a": "f29a82249b0f3a43df56ee905d26c374972948faf964c7fe7999a8a112e9658d",
+    "libturbojpeg_windows_amd64.a": "98cee00708fa7832ef32415721c3c206e2ecc3434be2703980036cde65cc3b9e"
+  },
+  "turbojpeg_source": {
+    "repository": "libjpeg-turbo/libjpeg-turbo",
+    "version": "3.2.0",
+    "tarball": "libjpeg-turbo-3.2.0.tar.gz",
+    "tarball_sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e",
+    "symbol_prefix": "fitz_ljt_"
+  },
+  "turbojpeg_files": {
+    "turbojpeg.h": "a852cfffe09fc1e0d942dd375755ba3a65bd11d6bb7f2e7b45ab08ae80d6758a",
+    "fitz_turbojpeg.h": "7cb4e5ba69416a362bdbb63f2a83f850c17b0b6827482f28f121e9d017dbd318",
+    "LICENSE.md": "ba6bceebcba0fdd35488477c2cca8c4632ce82c74dbfbc87d886ce6fc4433579",
+    "README.ijg": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6"
   }
 }
