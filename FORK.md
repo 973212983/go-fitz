@@ -18,6 +18,24 @@
 
 ## JPEG 编码
 
+### 独立 RGB 编码子包
+
+`turbojpeg.EncodeRGB(pix, width, height, stride, Options{Quality: 90, DPI: 150})`
+直接编码调用方持有的 RGB 像素，支持行填充，不导入根包、不链接 MuPDF。
+Windows/amd64 和 Linux/amd64 的 cgo 构建只链接现有的 libturbojpeg 静态库；
+`musl` 标签选择对应的 Linux 库。其余平台、CGO_ENABLED=0 或 `nocgo` 标签
+使用 image/jpeg 回退。两条路径均输出基线 4:2:0 JPEG，并写入 JFIF DPI。
+`turbojpeg.Available()` 可检查是否使用原生编码器。编码参数与 ImageJPEG 共用
+`include/turbojpeg/fitz_turbojpeg.h` 里的 `fitz_tj_compress`，改参数只改这一处。
+压缩器句柄和输出缓冲在调用之间复用（最多缓存 16 个）。DPI 先四舍五入，
+结果须在 1–65535 之间。`include/turbojpeg` 和 `libs` 由 `required` 标签的
+空导入带进 `go mod vendor`。
+
+测试：`go test ./turbojpeg`、`go test -tags nocgo ./turbojpeg`，涵盖尺寸、
+行填充、参数错误、DPI 取整、色度采样、并发一致性，以及 windows/amd64、
+linux/amd64 的 cgo 构建确实链接了 libjpeg-turbo。改了 include/ 下的头文件后
+要用新的 GOCACHE 测试。
+
 ImageJPEG 默认用 libjpeg-turbo（fitz_jpeg_turbo.c），仅 windows/amd64、linux/amd64（glibc 与 musl）带预编译库；其余平台用下面的快速编码器，输出与 libjpeg 逐字节相同。
 
 ### libjpeg-turbo（fitz_jpeg_turbo.c）

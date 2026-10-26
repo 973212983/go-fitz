@@ -30,15 +30,8 @@ fz_buffer *invoice_encode_jpeg_turbo(fz_context *ctx, const fz_pixmap *pix, int 
 	if (!tj)
 		fz_throw(ctx, FZ_ERROR_SYSTEM, "libjpeg-turbo: %s", tj3GetErrorStr(NULL));
 	/* An opaque alpha channel is skipped as padding, like the other encoders do. */
-	if (tj3Set(tj, TJPARAM_QUALITY, quality) ||
-		tj3Set(tj, TJPARAM_SUBSAMP, TJSAMP_420) ||
-		tj3Set(tj, TJPARAM_FASTDCT, 0) ||
-		tj3Set(tj, TJPARAM_OPTIMIZE, 0) ||
-		tj3Set(tj, TJPARAM_DENSITYUNITS, 1) ||
-		tj3Set(tj, TJPARAM_XDENSITY, pix->xres) ||
-		tj3Set(tj, TJPARAM_YDENSITY, pix->yres) ||
-		tj3Compress8(tj, pix->samples, pix->w, (int)pix->stride, pix->h,
-			pix->n == 4 ? TJPF_RGBX : TJPF_RGB, &out, &size))
+	if (fitz_tj_compress(tj, pix->samples, pix->w, (int)pix->stride, pix->h,
+			pix->n == 4 ? TJPF_RGBX : TJPF_RGB, quality, pix->xres, pix->yres, &out, &size))
 		fz_strlcpy(message, tj3GetErrorStr(tj), sizeof message);
 	tj3Destroy(tj);
 	if (message[0]) {
